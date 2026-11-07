@@ -1,0 +1,44 @@
+import type { Paragraph } from '../types.js'
+import { paragraphSourceText } from './source-text.js'
+
+export interface ChunkRule {
+  maxParagraphs: number
+  maxChars: number
+}
+
+export interface TranslationBatch {
+  paragraphs: Paragraph[]
+  skipIds: number[] // code 段落 id：不翻译，原样写回
+}
+
+export function chunkParagraphs(paragraphs: Paragraph[], rule: ChunkRule): TranslationBatch[] {
+  const batches: TranslationBatch[] = []
+  let current: Paragraph[] = []
+  let chars = 0
+
+  const flush = (): void => {
+    if (current.length > 0) {
+      batches.push({ paragraphs: current, skipIds: current.filter(p => p.type === 'code').map(p => p.id) })
+      current = []
+      chars = 0
+    }
+  }
+
+  for (const p of paragraphs) {
+    const text = paragraphSourceText(p)
+    if (p.type === 'code') {
+      // 代码段：独立一批（skip），不占用正文批次；段落保留在 paragraphs 中，
+      // 供流水线（Task 23）按 id 原样写回译文。先 flush 当前正文批次以保持文档顺序。
+      flush()
+      batches.push({ paragraphs: [p], skipIds: [p.id] })
+      continue
+    }
+    if (current.length > 0 && (current.length >= rule.maxParagraphs || chars + text.length > rule.maxChars)) {
+      flush()
+    }
+    current.push(p)
+    chars += text.length
+  }
+  flush()
+  return batches
+}
